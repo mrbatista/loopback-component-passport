@@ -16,7 +16,25 @@ describe('UserIdentity', function() {
   });
 
   beforeEach(function setupDatabase(done) {
-    User.destroyAll(done);
+    User.destroyAll(function() {
+      UserIdentity.destroyAll(done);
+    });
+  });
+  
+  it('test findOrCreate fail', function(done) {
+    var userTest = {
+      email: 'foo@bar.com',
+      password: 'pass',
+    };
+    User.create(userTest, function(err, u) {
+      assert(!err, 'No error should be reported');
+      assert(u);
+      console.log('before', u);
+      User.findOrCreate({where: {email: u.email}}, userTest, function(err, uu, created) {
+        console.log('after', err, uu, created);
+        done();
+      })
+    })
   });
 
   it('supports 3rd party login', function(done) {
@@ -26,7 +44,7 @@ describe('UserIdentity', function() {
       ], id: 'f123', username: 'xyz',
       }, {accessToken: 'at1', refreshToken: 'rt1'},
       {autoLogin: false},
-      function(err, user, identity, token) {
+      function(err, user, identity, isNewInstance, token) {
         assert(!err, 'No error should be reported');
         assert.equal(user.username, 'facebook.xyz');
         assert.equal(user.email, 'xyz@loopback.facebook.com');
@@ -67,7 +85,7 @@ describe('UserIdentity', function() {
           {emails: [
             {value: 'abc1@facebook.com'},
           ], id: 'f456', username: 'xyz',
-          }, {accessToken: 'at2', refreshToken: 'rt2'}, function(err, user, identity, token) {
+          }, {accessToken: 'at2', refreshToken: 'rt2'}, function(err, user, identity, isNewInstance, token) {
             if (err) return done(err);
             assert.equal(user.username, 'facebook.abc');
             assert.equal(user.email, 'abc@facebook.com');
@@ -103,7 +121,7 @@ describe('UserIdentity', function() {
         {emails: [
           {value: '789@facebook.com'},
         ], id: 'f789', username: 'ttt',
-        }, {accessToken: 'at3', refreshToken: 'rt3'}, function(err, user, identity, token) {
+        }, {accessToken: 'at3', refreshToken: 'rt3'}, function(err, user, identity, isNewInstance, token) {
           assert(!err, 'No error should be reported');
           assert.equal(user.username, 'facebook.ttt');
           assert.equal(user.email, 'ttt@loopback.facebook.com');
@@ -139,7 +157,7 @@ describe('UserIdentity', function() {
             email: profile.emails[0].value,
             password: 'sss',
           };
-        }}, function(err, user, identity, token) {
+        }}, function(err, user, identity, isNewInstance, token) {
           assert(!err, 'No error should be reported');
           assert.equal(user.username, 'joy@facebook');
           assert.equal(user.email, 'foo@baz.com');
@@ -168,7 +186,7 @@ describe('UserIdentity', function() {
     var credentials = {accessToken: 'atldap1', refreshToken: 'rtldap1'};
     var options = {autoLogin: false};
     UserIdentity.login('ldap', 'ldap', identity, credentials, options,
-       function(err, user, identity, token) {
+       function(err, user, identity, isNewInstance, token) {
          if (err) return done(err);
 
          assert.equal(user.username, 'ldap.xyzldap');
@@ -240,6 +258,142 @@ describe('UserIdentity', function() {
     });
   });
 
+  it('isNewInstance true', function(done) {
+    UserIdentity.login('facebook', 'oAuth 2.0',
+      {emails: [
+        {value: 'foo@bar.com'},
+      ], id: 'f123', username: 'xyz',
+      }, {accessToken: 'at1', refreshToken: 'rt1'},
+      function(err, user, identity, isNewInstance, token) {
+        assert(!err, 'No error should be reported');
+        assert.equal(user.username, 'facebook.xyz');
+        assert.equal(user.email, 'xyz@loopback.facebook.com');
+
+        assert.equal(identity.externalId, 'f123');
+        assert.equal(identity.provider, 'facebook');
+        assert.equal(identity.authScheme, 'oAuth 2.0');
+        assert.deepEqual(identity.credentials, {accessToken: 'at1', refreshToken: 'rt1'});
+
+        assert.equal(user.id, identity.userId);
+        assert(isNewInstance);
+        assert(token);
+
+        // Follow the belongsTo relation
+        identity.user(function(err, user) {
+          assert(!err, 'No error should be reported');
+          assert.equal(user.username, 'facebook.xyz');
+          assert.equal(user.email, 'xyz@loopback.facebook.com');
+          done();
+        });
+      });
+  });
+
+  it('isNewInstance true autoLogin false', function(done) {
+    UserIdentity.login('facebook', 'oAuth 2.0',
+      {emails: [
+        {value: 'foo@bar.com'},
+      ], id: 'f123', username: 'xyz',
+      }, {accessToken: 'at1', refreshToken: 'rt1'},
+      {autoLogin: false},
+      function(err, user, identity, isNewInstance, token) {
+        assert(!err, 'No error should be reported');
+        assert.equal(user.username, 'facebook.xyz');
+        assert.equal(user.email, 'xyz@loopback.facebook.com');
+
+        assert.equal(identity.externalId, 'f123');
+        assert.equal(identity.provider, 'facebook');
+        assert.equal(identity.authScheme, 'oAuth 2.0');
+        assert.deepEqual(identity.credentials, {accessToken: 'at1', refreshToken: 'rt1'});
+
+        assert.equal(user.id, identity.userId);
+        assert(isNewInstance);
+        assert(!token);
+
+        // Follow the belongsTo relation
+        identity.user(function(err, user) {
+          assert(!err, 'No error should be reported');
+          assert.equal(user.username, 'facebook.xyz');
+          assert.equal(user.email, 'xyz@loopback.facebook.com');
+          done();
+        });
+      });
+  });
+
+  it('isNewInstance false', function(done) {
+    User.create({
+      username: 'facebook.789',
+      email: '789@facebook.com',
+      password: 'pass',
+    }, function(err, user) {
+      UserIdentity.login('facebook', 'oAuth 2.0',
+        {emails: [
+          {value: '789@facebook.com'},
+        ], id: 'f789', username: 'ttt',
+        }, {accessToken: 'at3', refreshToken: 'rt3'}, function(err, user, identity, isNewInstance, token) {
+          assert(!err, 'No error should be reported');
+          assert.equal(user.username, 'facebook.ttt');
+          assert.equal(user.email, 'ttt@loopback.facebook.com');
+
+          assert.equal(identity.externalId, 'f789');
+          assert.equal(identity.provider, 'facebook');
+          assert.equal(identity.authScheme, 'oAuth 2.0');
+          assert.deepEqual(identity.credentials, {accessToken: 'at3', refreshToken: 'rt3'});
+
+          assert.equal(user.id, identity.userId);
+          assert(!isNewInstance);
+          assert(token);
+
+          // Follow the belongsTo relation
+          identity.user(function(err, user) {
+            assert(!err, 'No error should be reported');
+            assert.equal(user.username, 'facebook.ttt');
+            assert.equal(user.email, 'ttt@loopback.facebook.com');
+            done();
+          });
+        });
+    });
+  });
+
+  it('isNewInstance false autoLogin false', function(done) {
+    User.create({
+      username: 'facebook.789',
+      email: '789@facebook.com',
+      password: 'pass',
+    }, function(err, user) {
+      UserIdentity.login('facebook', 'oAuth 2.0',
+        {
+          emails: [
+            {value: '789@facebook.com'},
+          ], id: 'f789',
+        }, {accessToken: 'at3', refreshToken: 'rt3'}, {autoLogin: false},
+        function(err, user, identity, isNewInstance, token) {
+          assert(!err, 'No error should be reported');
+          assert.equal(user.username, 'facebook.f789');
+          assert.equal(user.email, 'f789@loopback.facebook.com');
+
+          assert.equal(identity.externalId, 'f789');
+          assert.equal(identity.provider, 'facebook');
+          assert.equal(identity.authScheme, 'oAuth 2.0');
+          assert.deepEqual(identity.credentials, {
+            accessToken: 'at3',
+            refreshToken: 'rt3'
+          });
+
+          assert.equal(user.id, identity.userId);
+          assert(!isNewInstance);
+          assert(!token);
+
+          // Follow the belongsTo relation
+          identity.user(function(err, user) {
+            assert(!err, 'No error should be reported');
+            assert.equal(user.username, 'facebook.ttt');
+            assert.equal(user.email, 'ttt@loopback.facebook.com');
+            done();
+          });
+        });
+    });
+  });
+
   describe('emailOptional set to false', function(err) {
     it('creates a user when given an email address', function(done) {
       var username = 'fbu123';
@@ -253,7 +407,7 @@ describe('UserIdentity', function() {
       }, {
         emailOptional: false,
         profileToUser: customProfileToUser,
-      }, function(err, user, identity, token) {
+      }, function(err, user, identity, isNewInstance, token) {
         if (err) return done(err);
         assert.equal(user.username, username);
         done();
@@ -272,7 +426,7 @@ describe('UserIdentity', function() {
         }, {
           emailOptional: false,
           profileToUser: customProfileToUser,
-        }, function(err, user, identity, token) {
+        }, function(err, user, identity, isNewInstance, token) {
           assert(err.match(/email is missing/), 'Should report error');
           assert(typeof user === 'undefined', 'Should not return a user instance');
           User.count(function(err, countAfter) {
